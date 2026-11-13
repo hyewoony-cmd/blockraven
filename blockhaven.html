@@ -1348,7 +1348,7 @@ async function goOnline() {
 // Username + password log-in. Each character's bag, hotbar, health and position are
 // stored in the `players` table (see supabase/setup.sql). The publishable key is safe
 // to ship in the browser: row-level security lets each player read/write only their own row.
-const SUPABASE_URL = 'https://xjztspfzddyyvjrzjnca.supabase.co';
+const SUPABASE_URL = 'https://xjztspfzddyyvjzrjnca.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_wRKtTLCEhNHqtL79AFCV0Q_2Ht-HeYt';
 const ID_DOMAIN = 'players.blockhaven.game';   // usernames become hidden e-mail addresses for Supabase Auth
 function makeClient() { try { return window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null; } catch (e) { return null; } }

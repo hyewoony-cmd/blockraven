@@ -19,12 +19,12 @@ drop policy if exists "players insert own" on public.players;
 drop policy if exists "players update own" on public.players;
 
 create policy "players read own" on public.players
-  for select to authenticated using (auth.uid() = user_id);
+  for select to authenticated using ((select auth.uid()) = user_id);
 
 create policy "players insert own" on public.players
-  for insert to authenticated with check (auth.uid() = user_id);
+  for insert to authenticated with check ((select auth.uid()) = user_id);
 
 create policy "players update own" on public.players
-  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 grant select, insert, update on public.players to authenticated;
