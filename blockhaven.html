@@ -75,6 +75,17 @@
   .chip.miss{color:#ff8a80}
   .rec button{background:#5fb348;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer}
   .rec button:disabled{background:#555;cursor:default}
+  #auth{margin:0 0 16px}
+  #authForm{display:flex;flex-direction:column;gap:8px;align-items:center;cursor:default}
+  #authForm input{width:240px;box-sizing:border-box;padding:9px 12px;border-radius:7px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:14px;outline:none}
+  #authForm input:focus{border-color:#ffe08a}
+  .authBtns{display:flex;gap:8px}
+  .authBtns button{padding:8px 18px;border:0;border-radius:7px;font-weight:600;font-size:14px;cursor:pointer;color:#fff;background:#5fb348}
+  .authBtns button.alt{background:rgba(255,255,255,.15)}
+  button.link{background:none;border:0;color:#fff;opacity:.7;text-decoration:underline;cursor:pointer;font-size:12px}
+  button.link:hover{opacity:1}
+  #authMsg{min-height:16px;font-size:12px}
+  #authUser{font-size:14px;opacity:.9}
 </style>
 </head>
 <body>
@@ -95,7 +106,17 @@
   <div class="card">
     <h1>BLOCKHAVEN</h1>
     <p class="sub">Gather, craft and build. Watch out after dark.</p>
-    <div class="play" id="playLabel">Click to play</div>
+    <div id="auth">
+      <div id="authForm">
+        <input id="authId" maxlength="16" placeholder="Username" autocomplete="username" spellcheck="false">
+        <input id="authPw" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+        <div class="authBtns"><button id="btnLogin">Log in</button><button id="btnSignup" class="alt">Sign up</button></div>
+        <div id="authMsg"></div>
+        <button id="btnGuest" class="link">Play as guest (saved on this browser only)</button>
+      </div>
+      <div id="authUser" class="hidden">Playing as <b id="authName"></b> · <button id="btnLogout" class="link">Log out</button></div>
+    </div>
+    <div class="play hidden" id="playLabel">Click to play</div>
     <table>
       <tr><td>Mouse</td><td>Look around</td></tr>
       <tr><td>W A S D</td><td>Move · Shift to sprint</td></tr>
@@ -122,6 +143,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (() => {
 // ================= World =================
@@ -560,9 +582,11 @@ $('panel').addEventListener('click', e => e.stopPropagation());
 
 // ================= Save / load =================
 let dirty = false;
+const acct = { sb: null, user: null, name: '', mode: 'none', lastSaved: '', saving: false, busy: false };   // see "Accounts" below
 const BAG_KEY = SAVE_KEY + '-bag';
 function save() {
-  try { localStorage.setItem(BAG_KEY, JSON.stringify({ inv, hot, hp: P.hp })); } catch (e) {}
+  // a logged-in character's bag lives in their account, not in this browser
+  if (acct.mode !== 'user') { try { localStorage.setItem(BAG_KEY, JSON.stringify({ inv, hot, hp: P.hp })); } catch (e) {} }
   if (online.shared) return;   // the shared world lives online
   try {
     let s = '';
@@ -904,7 +928,7 @@ function startPlay() {
   setTimeout(() => { if (!locked && !everLocked) freeLook = true; }, 400);
 }
 function pause() { playing = false; lmb = false; overlay.style.display = 'flex'; $('playLabel').textContent = 'Click to resume'; }
-overlay.addEventListener('click', startPlay);
+overlay.addEventListener('click', () => { if (acct.mode !== 'none') startPlay(); });
 $('newWorld').addEventListener('click', e => {
   e.stopPropagation();
   if (online.shared) {
@@ -913,7 +937,8 @@ $('newWorld').addEventListener('click', e => {
     resetShared(); return;
   }
   seed = (Math.random() * 1e9) | 0; generate(); buildAll(); spawn();
-  inv = {}; hot = Array(9).fill(0); P.hp = 10; clock = DAY * 0.08;
+  if (acct.mode !== 'user') { inv = {}; hot = Array(9).fill(0); P.hp = 10; }   // an account's character keeps its bag across worlds
+  clock = DAY * 0.08;
   while (mobs.length) removeMob(mobs[0]);
   refreshBar(); refreshHP(); save();
 });
@@ -947,6 +972,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('wheel', e => { if (playing && !uiOpen) select(sel + (e.deltaY > 0 ? 1 : -1)); }, { passive: true });
 addEventListener('keydown', e => {
   if (e.target === chatIn || chatOpen()) return;
+  if (e.target && e.target.tagName === 'INPUT') return;   // typing in the login form
   if ((e.code === 'KeyT' || e.code === 'Enter') && playing && !uiOpen && online.room) { e.preventDefault(); openChat(); return; }
   if (e.code === 'KeyE' && playing) { e.preventDefault(); uiOpen ? closeCraft() : openCraft(); return; }
   if (uiOpen) { if (e.code === 'Escape') closeCraft(); return; }
@@ -1318,11 +1344,106 @@ async function goOnline() {
   }
 }
 
+// ================= Accounts (Supabase) =================
+// Username + password log-in. Each character's bag, hotbar, health and position are
+// stored in the `players` table (see supabase/setup.sql). The publishable key is safe
+// to ship in the browser: row-level security lets each player read/write only their own row.
+const SUPABASE_URL = 'https://xjztspfzddyyvjrzjnca.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_wRKtTLCEhNHqtL79AFCV0Q_2Ht-HeYt';
+const ID_DOMAIN = 'players.blockhaven.game';   // usernames become hidden e-mail addresses for Supabase Auth
+function makeClient() { try { return window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null; } catch (e) { return null; } }
+acct.sb = makeClient();
+function authMsg(t, bad) { const m = $('authMsg'); m.textContent = t || ''; m.style.color = bad ? '#ff8a80' : '#ffe08a'; }
+function setMode(mode) {
+  acct.mode = mode;
+  $('authForm').classList.toggle('hidden', mode !== 'none');
+  $('authUser').classList.toggle('hidden', mode !== 'user');
+  $('playLabel').classList.toggle('hidden', mode === 'none');
+  overlay.style.cursor = mode === 'none' ? 'default' : 'pointer';
+  if (mode === 'user') $('authName').textContent = acct.name;
+}
+async function signIn(signup) {
+  if (!acct.sb) return authMsg('Can’t reach the account server. You can still play as a guest.', true);
+  const id = $('authId').value.trim().toLowerCase(), pw = $('authPw').value;
+  if (!/^[a-z0-9_]{3,16}$/.test(id)) return authMsg('Username: 3–16 letters, numbers or _', true);
+  if (pw.length < 6) return authMsg('Password must be at least 6 characters.', true);
+  if (acct.busy) return; acct.busy = true;
+  authMsg(signup ? 'Creating your character…' : 'Logging in…');
+  const email = `${id}@${ID_DOMAIN}`;
+  let res;
+  try {
+    res = signup
+      ? await acct.sb.auth.signUp({ email, password: pw, options: { data: { username: id } } })
+      : await acct.sb.auth.signInWithPassword({ email, password: pw });
+  } catch (e) { res = { error: { message: 'Network error — try again.' } }; }
+  acct.busy = false;
+  if (res.error) {
+    const m = res.error.message || 'Something went wrong.';
+    if (/already registered|already exists/i.test(m)) return authMsg('That username is already taken.', true);
+    if (/invalid login|invalid credentials/i.test(m)) return authMsg('Wrong username or password.', true);
+    if (/not confirmed/i.test(m)) return authMsg('“Confirm email” is still on in Supabase (see README).', true);
+    return authMsg(m, true);
+  }
+  if (!res.data.session) return authMsg('Account made, but “Confirm email” is on in Supabase — turn it off (see README).', true);
+  await enterAccount(res.data.session.user);
+}
+async function enterAccount(user) {
+  acct.user = user;
+  acct.name = (user.user_metadata && user.user_metadata.username) || (user.email || '').split('@')[0];
+  authMsg('Loading your character…');
+  const { data, error } = await acct.sb.from('players').select('inv,hot,hp,pos').eq('user_id', user.id).maybeSingle();
+  if (error) { acct.user = null; setMode('none'); return authMsg('Couldn’t load your character: ' + error.message, true); }
+  if (data) {
+    inv = data.inv && typeof data.inv === 'object' ? data.inv : {};
+    hot = Array.isArray(data.hot) && data.hot.length === 9 ? data.hot : Array(9).fill(0);
+    P.hp = data.hp > 0 ? Math.min(10, data.hp) : 10;
+    const p = data.pos;
+    if (Array.isArray(p) && p.length === 3 && p.every(Number.isFinite) && p[0] >= 0 && p[0] < W && p[2] >= 0 && p[2] < W && p[1] > 0 && p[1] < H
+        && !get(Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2])) && !get(Math.floor(p[0]), Math.floor(p[1] + 1), Math.floor(p[2]))) {
+      P.p.set(p[0], p[1], p[2]); P.v.set(0, 0, 0);
+    } else spawn();
+  } else {                                  // brand-new character
+    inv = {}; hot = Array(9).fill(0); P.hp = 10; spawn();
+  }
+  refreshBar(); refreshHP(); authMsg(''); setMode('user');
+  await cloudSave(true);
+  toast(`Welcome, ${acct.name}!`);
+}
+async function cloudSave(force) {
+  if (acct.mode !== 'user' || !acct.user || acct.saving) return;
+  const pos = [+P.p.x.toFixed(2), +P.p.y.toFixed(2), +P.p.z.toFixed(2)];
+  const snap = JSON.stringify([inv, hot, P.hp, pos]);
+  if (!force && snap === acct.lastSaved) return;
+  acct.saving = true;
+  try {
+    const { error } = await acct.sb.from('players').upsert({ user_id: acct.user.id, username: acct.name, inv, hot, hp: P.hp, pos, updated_at: new Date().toISOString() });
+    if (error) toastOnce('cloud', 'Couldn’t save your character online: ' + error.message, 30); else acct.lastSaved = snap;
+  } catch (e) { toastOnce('cloud', 'Couldn’t save your character online.', 30); }
+  acct.saving = false;
+}
+setInterval(() => cloudSave(), 5000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cloudSave(); });
+$('authForm').addEventListener('click', e => e.stopPropagation());
+$('btnLogin').addEventListener('click', () => signIn(false));
+$('btnSignup').addEventListener('click', () => signIn(true));
+$('authPw').addEventListener('keydown', e => { if (e.code === 'Enter' || e.key === 'Enter') signIn(false); });
+$('authId').addEventListener('keydown', e => { if (e.code === 'Enter' || e.key === 'Enter') $('authPw').focus(); });
+$('btnGuest').addEventListener('click', () => { setMode('guest'); startPlay(); });
+$('btnLogout').addEventListener('click', async e => {
+  e.stopPropagation();
+  await cloudSave(true);
+  try { await acct.sb.auth.signOut(); } catch (err) {}
+  location.reload();
+});
+
 if (!load()) generate();
 loadBag();
 buildAll();
 spawn();
 refreshBar(); refreshHP();
+setMode('none');
+if (acct.sb) acct.sb.auth.getSession().then(({ data }) => { if (data && data.session) enterAccount(data.session.user); }).catch(() => {});
+else authMsg('Account server unavailable — you can play as a guest.', true);
 requestAnimationFrame(frame);
 goOnline();
 })();

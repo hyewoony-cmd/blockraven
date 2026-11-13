@@ -33,6 +33,20 @@
 10. **Input, 게임 루프(`frame`)**
 11. **Online**: 공유 월드, 다른 플레이어 아바타, 채팅, 주먹질 동기화
 
+## 계정(로그인)과 캐릭터 저장 — Supabase
+- 첫 화면에서 **아이디 + 비밀번호**로 회원가입/로그인합니다. 로그인하지 않고 "Play as guest"로 혼자 할 수도 있습니다(이 브라우저에만 저장).
+- 로그인한 캐릭터의 **인벤토리, 핫바, 체력, 위치**가 Supabase `players` 테이블에 5초마다(바뀐 경우에만) 저장되고, 다른 컴퓨터에서 로그인해도 그대로 불러옵니다.
+- 캐릭터는 월드와 따로 저장됩니다. "Generate a new world"를 눌러도 로그인한 캐릭터의 가방은 유지됩니다. 월드(블록) 자체는 아직 각 브라우저의 localStorage에 저장됩니다.
+- 아이디는 Supabase Auth에서 `아이디@players.blockhaven.game` 형태의 숨은 이메일로 쓰입니다. 그래서 이메일로 비밀번호 찾기는 안 됩니다.
+- 코드: `<script>` 맨 아래쪽 **Accounts (Supabase)** 부분(`signIn`, `enterAccount`, `cloudSave`). 접속 정보는 `SUPABASE_URL`, `SUPABASE_KEY`(공개용 publishable key — 브라우저에 넣어도 안전).
+
+### Supabase 처음 설정 (한 번만)
+1. Supabase 대시보드 → **SQL Editor** → New query에 [`supabase/setup.sql`](supabase/setup.sql) 내용을 붙여넣고 **Run**.
+2. **Authentication → Sign In / Providers → Email**에서 **Confirm email**을 끄고 저장. (가짜 이메일이라 확인 메일을 받을 수 없기 때문)
+3. secret key / service_role key는 절대 코드나 저장소에 넣지 마세요.
+
+> 참고: 지금은 아이템 수량을 브라우저가 직접 저장하므로, 마음먹고 개발자 도구를 쓰면 자기 캐릭터의 아이템을 조작할 수 있습니다. 경쟁 요소가 생기면 서버 쪽 검증을 추가해야 합니다.
+
 ## 온라인 기능에 대해 꼭 알아둘 점
 멀티플레이는 claude.ai 아티팩트 플랫폼 기능인 `window.claude.use("db" | "room" | "user")`를 사용합니다.
 - `db`: 월드를 저장합니다. `world/meta` 문서에 `{seed, epoch, t0}`가 있고, `world/c0` ~ `world/c15` 문서에 청크별로 바뀐 블록 목록이 들어 있습니다.
