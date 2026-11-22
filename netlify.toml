@@ -1,0 +1,8 @@
+# Netlify: serve the game file at the site root (no build step needed)
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/"
+  to = "/blockhaven.html"
+  status = 200
