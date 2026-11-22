@@ -1137,7 +1137,11 @@ function onWorld(snap) {
     for (const id in docs) { const m = /^c(\d+)$/.exec(id); if (m && +m[1] < NC * NC && docs[id].epoch === online.epoch) applyChunkDoc(+m[1], docs[id]); }
     buildAll();
     while (mobs.length) removeMob(mobs[0]);
-    spawn(); mine = null;
+    // a returning account keeps its saved spot on the shared island if it's still free
+    const fx = Math.floor(P.p.x), fy = Math.floor(P.p.y), fz = Math.floor(P.p.z);
+    const free = fx >= 0 && fx < W && fz >= 0 && fz < W && fy > 0 && fy < H - 1 && !get(fx, fy, fz) && !get(fx, fy + 1, fz);
+    if (!(first && acct.mode === 'user' && free)) spawn();
+    mine = null;
     toast(first ? 'Joined the shared island — everyone with the link builds here together.' : 'The owner started a fresh island!');
     $('newWorld').style.display = online.canAdmin ? '' : 'none';
     return;
@@ -1327,9 +1331,129 @@ function setupRoom(room) {
   }, () => {});
   renderPlayerList();
 }
+// ================= Online: Supabase backend (everywhere outside claude.ai) =================
+// Same shape as the claude.ai `db` / `room` / `user` helpers, so the code above works unchanged.
+// World docs live in the `world_docs` table (see supabase/multiplayer.sql); players talk over a Realtime channel.
+function colorFor(name) {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return '#' + new THREE.Color().setHSL((h % 360) / 360, .6, .55).getHexString();
+}
+function sbFail(error) {
+  const e = new Error(error.message || 'error');
+  e.code = error.code === '42501' ? 'invalid_argument' : error.code === '23514' ? 'quota_exceeded' : (error.code || 'error');
+  return e;
+}
+function sbWorldDb(sb) {
+  let docs = new Map();   // id -> data
+  const wrap = id => ({ id, exists: docs.has(id), data: () => docs.get(id) });
+  return {
+    collection() {
+      return { onSnapshot(cb, onErr) {
+        let ready = false;
+        const emit = changes => cb({ docs: [...docs.keys()].map(wrap), docChanges: () => changes });
+        sb.channel('blockhaven-world')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'world_docs' }, pl => {
+            if (pl.eventType === 'DELETE') {
+              const id = pl.old && pl.old.id; if (!id || !docs.has(id)) return;
+              docs.delete(id);
+              if (ready) emit([{ type: 'removed', doc: { id, exists: false, data: () => undefined } }]);
+              return;
+            }
+            const row = pl.new; if (!row || typeof row.id !== 'string') return;
+            const had = docs.has(row.id); docs.set(row.id, row.data);
+            if (ready) emit([{ type: had ? 'modified' : 'added', doc: wrap(row.id) }]);
+          })
+          .subscribe(async status => {
+            if (status === 'SUBSCRIBED') {   // also after a reconnect: reload everything we may have missed
+              const { data, error } = await sb.from('world_docs').select('id,data');
+              if (error) { if (onErr) onErr(sbFail(error)); return; }
+              docs = new Map(data.map(r => [r.id, r.data]));
+              ready = true;
+              emit([...docs.keys()].map(id => ({ type: 'modified', doc: wrap(id) })));
+            } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && onErr) onErr(new Error(status));
+          });
+      } };
+    },
+    doc(path) {
+      const id = path.split('/').pop();
+      return {
+        async set(data) { const { error } = await sb.from('world_docs').upsert({ id, data, updated_at: new Date().toISOString() }); if (error) throw sbFail(error); },
+        async delete() { const { error } = await sb.from('world_docs').delete().eq('id', id); if (error) throw sbFail(error); },
+      };
+    },
+  };
+}
+function sbRoom(sb, me) {
+  const myKey = me.id.slice(0, 8) + '-' + Math.random().toString(36).slice(2, 8);   // one per tab
+  const states = new Map();   // peer -> latest presence object they broadcast
+  let members = new Map();    // peer -> { uid, name }
+  let mine = {}, live = false, peersCb = null, queued = false;
+  const handlers = {};
+  const ch = sb.channel('blockhaven-room', { config: { broadcast: { self: false }, presence: { key: myKey } } });
+  const list = () => [{ peer: myKey, sameTab: true, kind: 'viewer', by: me.id, presence: mine }]
+    .concat([...members].filter(([k]) => k !== myKey)
+      .map(([k, m]) => ({ peer: k, sameTab: false, kind: 'viewer', by: m.uid, presence: states.get(k) || {} })));
+  const notify = () => {
+    if (!peersCb || queued) return;
+    queued = true; setTimeout(() => { queued = false; peersCb({ peers: list() }); }, 0);
+  };
+  const sendState = () => live ? ch.send({ type: 'broadcast', event: 'st', payload: { k: myKey, s: mine } }) : Promise.resolve();
+  ch.on('presence', { event: 'sync' }, () => {
+      const st = ch.presenceState(), next = new Map();
+      for (const k in st) {
+        const m = st[k] && st[k][0];
+        if (m && typeof m.uid === 'string') next.set(k, { uid: m.uid, name: String(m.name || 'Explorer').slice(0, 16) });
+      }
+      for (const k of [...states.keys()]) if (!next.has(k)) states.delete(k);
+      members = next; notify();
+    })
+    .on('presence', { event: 'join' }, ({ key }) => { if (key !== myKey) sendState(); })   // let newcomers see us right away
+    .on('broadcast', { event: 'st' }, ({ payload }) => {
+      if (!payload || typeof payload.k !== 'string' || !payload.s || typeof payload.s !== 'object') return;
+      states.set(payload.k, payload.s); notify();
+    })
+    .on('broadcast', { event: 'edit' }, ({ payload }) => { (handlers.edit || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
+    .subscribe(async status => {
+      if (status === 'SUBSCRIBED') { live = true; await ch.track({ uid: me.id, name: me.name }); sendState(); }
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') live = false;
+    });
+  setInterval(() => { if (Object.keys(mine).length) sendState(); }, 3000);   // keep idle players visible
+  return {
+    room: {
+      async presence(obj) { Object.assign(mine, obj); return sendState(); },
+      onPeers(cb) { peersCb = cb; notify(); },
+      on(ev, cb) { (handlers[ev] = handlers[ev] || []).push(cb); },
+      async emit(ev, data) { if (live) return ch.send({ type: 'broadcast', event: ev, payload: data }); },
+    },
+    nameOf(uid) {
+      if (uid === me.id) return me.name;
+      for (const m of members.values()) if (m.uid === uid) return m.name;
+      return 'Explorer';
+    },
+  };
+}
+async function goOnlineSupabase() {
+  if (online.db || online.room || !acct.sb || !acct.user) return;
+  const sb = acct.sb, uid = acct.user.id;
+  const { room, nameOf } = sbRoom(sb, { id: uid, name: acct.name });
+  online.user = {
+    async profiles(ids) { const out = {}; for (const id of ids) { const name = nameOf(id); out[id] = { name, color: colorFor(name) }; } return out; },
+  };
+  try {
+    const { data } = await sb.from('world_admins').select('user_id').eq('user_id', uid).maybeSingle();
+    online.canAdmin = !!data;
+  } catch (e) { online.canAdmin = false; }
+  online.readOnly = false;
+  setupRoom(room);
+  online.db = sbWorldDb(sb);
+  loadTimer = setTimeout(() => toast('Can’t reach the shared island yet — playing solo for now.'), 10000);
+  online.db.collection('world').onSnapshot(onWorld, () => { clearTimeout(loadTimer); toastOnce('dberr', 'Lost the connection to the shared island.', 30); });
+}
+
 async function goOnline() {
   let tries = 0;
   while (!(window.claude && typeof window.claude.use === 'function')) { if (++tries > 20) return; await new Promise(r => setTimeout(r, 500)); }
+  if (online.db || online.room) return;   // already online through Supabase
   const [db, room, user] = await Promise.all(['db', 'room', 'user'].map(n => window.claude.use(n).catch(() => null)));
   online.user = user;
   if (user) {
@@ -1408,6 +1532,7 @@ async function enterAccount(user) {
   refreshBar(); refreshHP(); authMsg(''); setMode('user');
   await cloudSave(true);
   toast(`Welcome, ${acct.name}!`);
+  goOnlineSupabase();   // logged-in players share one island
 }
 async function cloudSave(force) {
   if (acct.mode !== 'user' || !acct.user || acct.saving) return;

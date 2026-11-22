@@ -50,14 +50,17 @@
 
 > 참고: 지금은 아이템 수량을 브라우저가 직접 저장하므로, 마음먹고 개발자 도구를 쓰면 자기 캐릭터의 아이템을 조작할 수 있습니다. 경쟁 요소가 생기면 서버 쪽 검증을 추가해야 합니다.
 
-## 온라인 기능에 대해 꼭 알아둘 점
-멀티플레이는 claude.ai 아티팩트 플랫폼 기능인 `window.claude.use("db" | "room" | "user")`를 사용합니다.
-- `db`: 월드를 저장합니다. `world/meta` 문서에 `{seed, epoch, t0}`가 있고, `world/c0` ~ `world/c15` 문서에 청크별로 바뀐 블록 목록이 들어 있습니다.
-- `room`: 실시간 통신에 씁니다. 블록 변경은 `edit` 이벤트로, 위치·시선·채팅(`say`)·휘두르기(`sw`)·주먹질(`pu`)은 presence로 주고받습니다.
-- `user`: 이름과 색상을 가져옵니다.
+## 멀티플레이 (Supabase)
+**로그인한 플레이어는 모두 같은 섬에서 함께 플레이합니다.** 게스트는 지금처럼 혼자 하는 모드입니다.
+- **월드 저장**: `world_docs` 테이블. `meta` 행에 `{seed, epoch, t0}`, `c0` ~ `c15` 행에 청크별로 바뀐 블록 목록이 들어 있습니다. 바뀐 내용은 Realtime(postgres_changes)으로 다른 플레이어에게 전달됩니다.
+- **실시간 통신**: Realtime 채널 `blockhaven-room`. 접속자 목록은 presence, 위치·시선·채팅·휘두르기·주먹질은 broadcast(`st`), 블록 변경은 broadcast(`edit`)로 주고받습니다.
+- **권한(RLS)**: 로그인한 사람은 누구나 섬을 보고 블록을 바꿀 수 있습니다. `meta`를 바꾸거나 청크를 지우는 것, 즉 "새 월드 만들기"는 `world_admins`에 등록된 사람만 할 수 있습니다.
+- 코드: `<script>` 아래쪽 **Online: Supabase backend** 부분(`sbWorldDb`, `sbRoom`, `goOnlineSupabase`). claude.ai 아티팩트와 같은 모양의 `db`/`room`/`user` 인터페이스를 흉내 내므로, 그 위의 게임 코드는 그대로 씁니다. claude.ai 아티팩트 안에서 열면 예전처럼 `window.claude` 기능을 씁니다.
+- 몹(Hopkin, Gloomling)은 아직 각자 화면에서 따로 움직입니다(동기화 안 됨).
 
-**이 기능들은 claude.ai 아티팩트 안에서만 동작합니다.** 파일을 직접 열거나 GitHub Pages 같은 곳에 올리면 `window.claude`가 없어서, 게임은 자동으로 혼자 하는 모드(localStorage 저장)로 돌아갑니다.
-claude.ai 바깥에서 멀티플레이를 하려면 `goOnline()`과 `online.*` 부분을 Firebase, Supabase, WebSocket 서버 같은 다른 실시간 백엔드로 바꿔야 합니다.
+### 처음 설정 (한 번만)
+1. SQL Editor에서 [`supabase/multiplayer.sql`](supabase/multiplayer.sql)을 실행합니다(`setup.sql` 다음에).
+2. 관리자를 정하려면 파일 맨 아래 주석의 `insert into public.world_admins ...` 줄에서 `USERNAME`을 바꿔 실행합니다.
 
 ## 원본 아티팩트
 https://claude.ai/artifact/2ED8uUx3QqaiNTroMb4zZ7
