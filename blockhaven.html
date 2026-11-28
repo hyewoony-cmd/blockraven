@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#5fb348">
 <title>Blockhaven</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#9fd3ff;font-family:system-ui,-apple-system,sans-serif;user-select:none}
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fd3ff;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
   canvas{display:block}
   #cross{position:fixed;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;pointer-events:none}
   #cross:before,#cross:after{content:"";position:absolute;background:rgba(255,255,255,.9);box-shadow:0 0 2px rgba(0,0,0,.6)}
@@ -86,6 +90,60 @@
   button.link:hover{opacity:1}
   #authMsg{min-height:16px;font-size:12px}
   #authUser{font-size:14px;opacity:.9}
+  /* ---------- touch controls (iPad / phone) ---------- */
+  #touchUI{display:none;position:fixed;inset:0;pointer-events:none;touch-action:none}
+  body.touch.playing #touchUI{display:block}
+  body.touch canvas{touch-action:none}
+  #joy{position:absolute;left:calc(22px + env(safe-area-inset-left));bottom:calc(26px + env(safe-area-inset-bottom));width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.3);pointer-events:auto;touch-action:none}
+  #joy i{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px 0 0 -31px;border-radius:50%;background:rgba(255,255,255,.45);box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  .tbtn{position:absolute;pointer-events:auto;touch-action:none;width:68px;height:68px;border-radius:50%;background:rgba(0,0,0,.38);border:2px solid rgba(255,255,255,.35);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-shadow:0 1px 2px #000}
+  .tbtn.on{background:rgba(255,224,138,.45);border-color:#ffe08a}
+  .tbtn.sm{width:46px;height:46px;font-size:19px}
+  #bMine{right:calc(104px + env(safe-area-inset-right));bottom:calc(118px + env(safe-area-inset-bottom));width:82px;height:82px;font-size:32px}
+  #bUse{right:calc(22px + env(safe-area-inset-right));bottom:calc(176px + env(safe-area-inset-bottom))}
+  #bJump{right:calc(22px + env(safe-area-inset-right));bottom:calc(96px + env(safe-area-inset-bottom));width:76px;height:76px}
+  #bDown{right:calc(108px + env(safe-area-inset-right));bottom:calc(36px + env(safe-area-inset-bottom));display:none}
+  body.flying #bDown{display:flex}
+  #tTop{position:absolute;top:calc(8px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));display:flex;gap:8px;pointer-events:none}
+  #tTop .tbtn{position:static}
+  body.touch #players{top:calc(62px + env(safe-area-inset-top))}
+  body.touch #held{display:none}
+  body.touch .slot{cursor:pointer}
+  .touchHelp{display:none;font-size:13px;line-height:1.6;opacity:.85;margin:0 0 6px}
+  body.touch .touchHelp{display:block}
+  body.touch .keysHelp{display:none}
+  #authForm input{font-size:16px}
+  body.touch #toasts{top:calc(62px + env(safe-area-inset-top))}
+  body.touch #hud{font-size:10px}
+  @media (max-width:640px),(max-height:500px){
+    .card{padding:18px 20px;max-height:92vh;overflow:auto;box-sizing:border-box}
+    h1{font-size:28px}
+    .cols{grid-template-columns:1fr}
+    .panel{padding:14px 16px}
+  }
+  @media (max-width:520px),(max-height:500px){
+    .slot{width:36px;height:36px}
+    .slot img{width:24px;height:24px}
+    #bar{gap:2px;padding:3px;bottom:calc(8px + env(safe-area-inset-bottom))}
+    #hp{bottom:calc(52px + env(safe-area-inset-bottom))}
+    #name{bottom:calc(72px + env(safe-area-inset-bottom))}
+    #joy{width:120px;height:120px}
+    #joy i{width:50px;height:50px;margin:-25px 0 0 -25px}
+    .tbtn{width:56px;height:56px;font-size:22px}
+    #bMine{width:68px;height:68px;font-size:27px;right:calc(86px + env(safe-area-inset-right));bottom:calc(96px + env(safe-area-inset-bottom))}
+    #bUse{bottom:calc(150px + env(safe-area-inset-bottom))}
+    #bJump{width:64px;height:64px;bottom:calc(78px + env(safe-area-inset-bottom))}
+    #bDown{right:calc(90px + env(safe-area-inset-right));bottom:calc(26px + env(safe-area-inset-bottom))}
+  }
+  /* phone held upright: lift the stick and buttons above the full-width hotbar */
+  @media (max-width:520px) and (orientation:portrait){
+    body.touch #joy{bottom:calc(96px + env(safe-area-inset-bottom))}
+    body.touch #bMine{bottom:calc(168px + env(safe-area-inset-bottom))}
+    body.touch #bJump{bottom:calc(150px + env(safe-area-inset-bottom))}
+    body.touch #bUse{bottom:calc(222px + env(safe-area-inset-bottom))}
+    body.touch #bDown{bottom:calc(96px + env(safe-area-inset-bottom))}
+    body.touch #hud{display:none}
+  }
 </style>
 </head>
 <body>
@@ -102,6 +160,19 @@
 <div id="players"></div>
 <div id="chatLog"></div>
 <input id="chatIn" maxlength="200" placeholder="Say something… (Enter to send, Esc to cancel)">
+<div id="touchUI">
+  <div id="joy"><i></i></div>
+  <div class="tbtn" id="bMine" title="Mine / attack">⛏</div>
+  <div class="tbtn" id="bUse" title="Place / use">✋</div>
+  <div class="tbtn" id="bJump" title="Jump / fly up">⤒</div>
+  <div class="tbtn" id="bDown" title="Fly down">⤓</div>
+  <div id="tTop">
+    <div class="tbtn sm" id="bChat" title="Chat" style="display:none">💬</div>
+    <div class="tbtn sm" id="bFly" title="Fly">🕊</div>
+    <div class="tbtn sm" id="bCraft" title="Workshop">🛠</div>
+    <div class="tbtn sm" id="bPause" title="Pause">⏸</div>
+  </div>
+</div>
 <div id="overlay">
   <div class="card">
     <h1>BLOCKHAVEN</h1>
@@ -117,7 +188,8 @@
       <div id="authUser" class="hidden">Playing as <b id="authName"></b> · <button id="btnLogout" class="link">Log out</button></div>
     </div>
     <div class="play hidden" id="playLabel">Click to play</div>
-    <table>
+    <p class="touchHelp">Left stick: move · Drag the screen: look around<br>⛏ hold to mine / tap to attack · ✋ place or use · ⤒ jump<br>Tap the screen to place, press &amp; hold it to mine · Tap a hotbar slot to pick it</p>
+    <table class="keysHelp">
       <tr><td>Mouse</td><td>Look around</td></tr>
       <tr><td>W A S D</td><td>Move · Shift to sprint</td></tr>
       <tr><td>Space</td><td>Jump / swim</td></tr>
@@ -644,6 +716,7 @@ function hurtPlayer(n, from) {
   if (P.hp <= 0) { spawn(); P.hp = 10; refreshHP(); toast('You fainted! Back at the island centre.'); }
 }
 const keys = {};
+const stick = { x: 0, y: 0 };   // touch joystick: x = right, y = forward, length ≤ 1
 function step(dt) {
   const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
   let mx = 0, mz = 0;
@@ -651,11 +724,13 @@ function step(dt) {
   if (keys.KeyS || keys.ArrowDown) { mx -= fx; mz -= fz; }
   if (keys.KeyD || keys.ArrowRight) { mx += rx; mz += rz; }
   if (keys.KeyA || keys.ArrowLeft) { mx -= rx; mz -= rz; }
+  let mag = 1;   // touch joystick: analog speed
+  if (!mx && !mz && (stick.x || stick.y)) { mx = fx * stick.y + rx * stick.x; mz = fz * stick.y + rz * stick.x; mag = Math.min(1, Math.hypot(stick.x, stick.y)); }
   const len = Math.hypot(mx, mz) || 1;
   const inWater = !P.fly && P.p.y + 0.6 < WATER + 0.85;
   let speed = P.fly ? 11 : (keys.ShiftLeft || keys.ShiftRight ? 6.4 : 4.3);
   if (inWater) speed *= 0.6;
-  P.v.x = mx / len * speed + P.kb.x; P.v.z = mz / len * speed + P.kb.z;
+  P.v.x = mx / len * speed * mag + P.kb.x; P.v.z = mz / len * speed * mag + P.kb.z;
   P.kb.multiplyScalar(Math.max(0, 1 - dt * 8));
   if (P.fly) P.v.y = ((keys.Space ? 1 : 0) - (keys.KeyC || keys.ControlLeft ? 1 : 0)) * 9;
   else if (inWater) { P.v.y -= 8 * dt; if (keys.Space) P.v.y = 3.2; P.v.y = Math.max(P.v.y, -3); }
@@ -922,12 +997,13 @@ function editBlock(x, y, z, b) {
 const canvas = renderer.domElement, overlay = $('overlay');
 let locked = false, everLocked = false, freeLook = false, playing = false, drag = null, lmb = false, started = false;
 function startPlay() {
-  overlay.style.display = 'none'; playing = true;
-  if (!started) { started = true; setTimeout(() => toast('Hold left click on a tree to gather logs, then press E to craft.'), 600); }
+  overlay.style.display = 'none'; playing = true; document.body.classList.add('playing');
+  if (!started) { started = true; setTimeout(() => toast(isTouch() ? 'Hold ⛏ while looking at a tree to gather logs, then tap 🛠 to craft.' : 'Hold left click on a tree to gather logs, then press E to craft.'), 600); }
+  if (isTouch()) { freeLook = true; return; }   // no pointer lock on touch screens
   try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { freeLook = true; }); } catch (e) { freeLook = true; }
   setTimeout(() => { if (!locked && !everLocked) freeLook = true; }, 400);
 }
-function pause() { playing = false; lmb = false; overlay.style.display = 'flex'; $('playLabel').textContent = 'Click to resume'; }
+function pause() { playing = false; lmb = false; overlay.style.display = 'flex'; document.body.classList.remove('playing'); stick.x = stick.y = 0; for (const k in keys) keys[k] = false; $('playLabel').textContent = isTouch() ? 'Tap to resume' : 'Click to resume'; }
 overlay.addEventListener('click', () => { if (acct.mode !== 'none') startPlay(); });
 $('newWorld').addEventListener('click', e => {
   e.stopPropagation();
@@ -983,6 +1059,108 @@ addEventListener('keydown', e => {
   if (e.code === 'Escape' && freeLook && playing) pause();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ================= Touch controls (iPad / phone) =================
+// Left stick moves, dragging anywhere on the world looks around, buttons on the right mine / place / jump.
+// A quick tap on the world places (or attacks a creature); pressing and holding it mines.
+let touchMode = false;
+function isTouch() { return touchMode; }
+function enableTouch() {
+  if (touchMode) return;
+  touchMode = true; document.body.classList.add('touch');
+  if ($('playLabel').textContent.startsWith('Click')) $('playLabel').textContent = $('playLabel').textContent.replace('Click', 'Tap');
+}
+if (matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0) enableTouch();
+addEventListener('touchstart', enableTouch, { passive: true, capture: true });
+
+const holdBtn = (id, down, up) => {
+  const el = $(id);
+  el.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); el.classList.add('on'); down(); }, { passive: false });
+  const end = e => { e.preventDefault(); el.classList.remove('on'); if (up) up(); };
+  el.addEventListener('touchend', end, { passive: false });
+  el.addEventListener('touchcancel', end, { passive: false });
+};
+let mineHeld = false;
+holdBtn('bMine', () => { if (!playing || uiOpen) return; mineHeld = true; primaryDown(); }, () => { mineHeld = false; lmb = false; });
+holdBtn('bUse', () => { if (playing && !uiOpen) use(); });
+holdBtn('bJump', () => { keys.Space = true; }, () => { keys.Space = false; });
+holdBtn('bDown', () => { keys.KeyC = true; }, () => { keys.KeyC = false; });
+holdBtn('bFly', () => { if (!playing) return; P.fly = !P.fly; P.v.y = 0; toast(P.fly ? 'Flying on — ⤒ up, ⤓ down' : 'Flying off'); });
+holdBtn('bCraft', () => { if (playing) uiOpen ? closeCraft() : openCraft(); });
+holdBtn('bPause', () => { if (playing) pause(); });
+holdBtn('bChat', () => { if (playing && !uiOpen && online.room) openChat(); });
+setInterval(() => {
+  // keep mining while ⛏ is held, moving on to the next block you look at
+  if (mineHeld && playing && !uiOpen && !lmb) { const t = target(); if (t && t.block && !online.readOnly) lmb = true; }
+  document.body.classList.toggle('flying', P.fly);
+  $('bFly').classList.toggle('on', P.fly);
+  $('bChat').style.display = online.room ? 'flex' : 'none';
+}, 120);
+
+// joystick
+const joy = $('joy'), knob = joy.firstChild;
+let joyId = null;
+function joyMove(t) {
+  const r = joy.getBoundingClientRect(), R = r.width / 2;
+  let dx = t.clientX - (r.left + R), dy = t.clientY - (r.top + R);
+  const d = Math.hypot(dx, dy), max = R * 0.62;
+  if (d > max) { dx *= max / d; dy *= max / d; }
+  knob.style.transform = `translate(${dx}px,${dy}px)`;
+  const dead = 0.12;
+  let sx = dx / max, sy = -dy / max;
+  if (Math.hypot(sx, sy) < dead) sx = sy = 0;
+  stick.x = sx; stick.y = sy;
+}
+joy.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; joyId = t.identifier; joyMove(t); }, { passive: false });
+joy.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) if (t.identifier === joyId) joyMove(t); }, { passive: false });
+const joyEnd = e => { for (const t of e.changedTouches) if (t.identifier === joyId) { joyId = null; stick.x = stick.y = 0; knob.style.transform = ''; } };
+joy.addEventListener('touchend', joyEnd); joy.addEventListener('touchcancel', joyEnd);
+
+// look around by dragging the world; tap = place / attack, press & hold = mine
+const looks = new Map();   // touch id -> { x, y, t0, moved, holdTimer, mining }
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (!playing || uiOpen) return;
+  for (const t of e.changedTouches) {
+    const L = { x: t.clientX, y: t.clientY, t0: performance.now(), moved: 0, mining: false };
+    L.holdTimer = setTimeout(() => { if (L.moved < 12 && playing && !uiOpen) { L.mining = true; primaryDown(); } }, 320);
+    looks.set(t.identifier, L);
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (uiOpen) return;
+  for (const t of e.changedTouches) {
+    const L = looks.get(t.identifier); if (!L) continue;
+    const dx = t.clientX - L.x, dy = t.clientY - L.y;
+    L.x = t.clientX; L.y = t.clientY; L.moved += Math.abs(dx) + Math.abs(dy);
+    look(dx, dy, 0.0065);
+    if (L.mining && L.moved > 40 && !mineHeld) { L.mining = false; lmb = false; }   // a long drag stops mining
+  }
+}, { passive: false });
+const lookEnd = e => {
+  for (const t of e.changedTouches) {
+    const L = looks.get(t.identifier); if (!L) continue;
+    clearTimeout(L.holdTimer); looks.delete(t.identifier);
+    if (L.mining) { if (!mineHeld) lmb = false; continue; }
+    if (e.type === 'touchend' && playing && !uiOpen && L.moved < 12 && performance.now() - L.t0 < 300) {
+      const tg = target();
+      if (tg && (tg.mob || tg.player)) primaryDown(); else use();
+    }
+  }
+};
+canvas.addEventListener('touchend', lookEnd); canvas.addEventListener('touchcancel', lookEnd);
+
+// tap a hotbar slot to pick it
+[...$('bar').children].forEach((d, i) => {
+  d.addEventListener('touchstart', e => { e.preventDefault(); select(i); }, { passive: false });
+  d.addEventListener('click', () => select(i));
+});
+// the start screen: tap to play (form fields still work)
+overlay.addEventListener('touchend', e => {
+  if (e.target.closest('#authForm, #btnLogout, #newWorld')) return;
+  if (acct.mode !== 'none') { e.preventDefault(); startPlay(); }
+}, { passive: false });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; lmb = false; });
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
