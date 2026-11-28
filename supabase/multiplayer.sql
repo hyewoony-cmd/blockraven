@@ -70,3 +70,19 @@ end $$;
 -- insert into public.world_admins (user_id)
 --   select id from auth.users where email = 'USERNAME@players.blockhaven.game'
 --   on conflict do nothing;
+
+-- Admin-only: put items in another player's gift box (the in-game /give ITEM COUNT PLAYER command).
+create or replace function public.admin_give(target text, item int, n int)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare found_row boolean;
+begin
+  if not public.is_world_admin() then raise exception 'admins only' using errcode = '42501'; end if;
+  if item < 1 or item > 999 or n < 1 or n > 999 then raise exception 'bad item or count' using errcode = '22023'; end if;
+  update public.players
+     set gift = gift || jsonb_build_object(item::text, coalesce((gift->>item::text)::int, 0) + n)
+   where username = lower(target);
+  get diagnostics found_row = row_count;
+  return found_row;
+end $$;
+revoke execute on function public.admin_give(text, int, int) from public, anon;
+grant execute on function public.admin_give(text, int, int) to authenticated;

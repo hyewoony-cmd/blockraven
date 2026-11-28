@@ -26,6 +26,13 @@
 - **주먹질**: 빈손 주먹 이미지가 있고, 다른 플레이어를 때릴 수 있습니다(PvP, 밀려남 효과 포함).
 - **다이아몬드**: y 1–7 깊이에 광맥으로 생성됩니다.
 - **TNT**: 작업대에서 Gloom Shard 3개 + Diamond 1개로 만듭니다. 설치한 TNT를 때리면(왼쪽 클릭 / 터치는 ⛏) 3초 뒤 폭발해 반경 약 3칸의 블록을 부수고(맨 아래층은 남음), 6칸 안의 플레이어와 5칸 안의 생물에게 피해를 줍니다. 근처 TNT는 연쇄 폭발합니다. 멀티플레이에서는 불붙인 사람이 결과를 저장하고, 다른 사람에게는 `lit` 메시지 하나만 보내 각자 화면에서 같은 폭발을 재생합니다. 코드: `// ================= TNT` 부분(`igniteTNT`, `lightFuse`, `explode`).
+- **크리에이티브 모드**: 모든 블록·아이템 무한, 한 번에 캐기, 피해 없음. 서바이벌 가방은 따로 보관됐다가 돌아오면 복원됩니다. 일시정지 화면의 "Creative mode" 버튼이나 `/c`(크리에이티브), `/s`(서바이벌). **게스트(혼자 플레이)는 누구나, 공유 섬에서는 관리자만** 쓸 수 있습니다.
+- **관리자(admin)**: `world_admins` 테이블에 있는 계정(현재 dylan, dylanipad, dylan_teacher). 이름 옆에 👑가 붙고 채팅 명령을 쓸 수 있습니다. T / Enter / `/` 키(터치는 💬)로 채팅을 열고 `/help`:
+  - `/give ITEM [개수] [플레이어]` — 예: `/give tnt 10`, `/give diamond 3 dylanipad`(다른 사람에게는 선물함으로, 서버 함수 `admin_give`가 관리자인지 확인)
+  - `/fill X1 Y1 Z1 X2 Y2 Z2 블록` · `/setblock X Y Z 블록` — `~`는 내 위치, `~3`은 내 위치+3, `air`는 지우기. 한 번에 최대 40000칸. 다른 플레이어에게는 `fill` 메시지 하나로 전달됩니다.
+  - `/tp 플레이어` 또는 `/tp X Y Z` · `/time day|noon|sunset|night|midnight|시각`(모두에게 적용) · `/heal` · `/clear` · `/spawn hopkin|gloomling [N]` · `/killmobs` · `/newworld confirm`
+  - 누구나: `/help`, `/pos`, `/fly`
+  - 관리자 추가: `insert into public.world_admins (user_id) select id from auth.users where email = '아이디@players.blockhaven.game';`
 
 ## 코드 구조 (`<script>` 안에서 위에서부터 순서대로)
 1. **World**: `world` 배열, `get`/`set`, `hash`/`fbm` 노이즈, `generate()`

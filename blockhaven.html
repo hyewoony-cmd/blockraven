@@ -159,7 +159,7 @@
 <img id="held" alt="">
 <div id="players"></div>
 <div id="chatLog"></div>
-<input id="chatIn" maxlength="200" placeholder="Say something… (Enter to send, Esc to cancel)">
+<input id="chatIn" maxlength="200" placeholder="Say something, or /help for commands (Enter to send, Esc to cancel)">
 <div id="touchUI">
   <div id="joy"><i></i></div>
   <div class="tbtn" id="bMine" title="Mine / attack">⛏</div>
@@ -167,7 +167,7 @@
   <div class="tbtn" id="bJump" title="Jump / fly up">⤒</div>
   <div class="tbtn" id="bDown" title="Fly down">⤓</div>
   <div id="tTop">
-    <div class="tbtn sm" id="bChat" title="Chat" style="display:none">💬</div>
+    <div class="tbtn sm" id="bChat" title="Chat / commands">💬</div>
     <div class="tbtn sm" id="bFly" title="Fly">🕊</div>
     <div class="tbtn sm" id="bCraft" title="Workshop">🛠</div>
     <div class="tbtn sm" id="bPause" title="Pause">⏸</div>
@@ -188,7 +188,8 @@
       <div id="authUser" class="hidden">Playing as <b id="authName"></b> · <button id="btnLogout" class="link">Log out</button></div>
     </div>
     <div class="play hidden" id="playLabel">Click to play</div>
-    <p class="touchHelp">Left stick: move · Drag the screen: look around<br>⛏ hold to mine / tap to attack · ✋ place or use · ⤒ jump<br>Tap the screen to place, press &amp; hold it to mine · Tap a hotbar slot to pick it</p>
+    <div><button id="btnCreative" class="link hidden">Creative mode: off</button></div>
+    <p class="touchHelp">Left stick: move · Drag the screen: look around<br>⛏ hold to mine / tap to attack · ✋ place or use · ⤒ jump<br>Tap the screen to place, press &amp; hold it to mine · Tap a hotbar slot to pick it · 💬 chat &amp; /help</p>
     <table class="keysHelp">
       <tr><td>Mouse</td><td>Look around</td></tr>
       <tr><td>W A S D</td><td>Move · Shift to sprint</td></tr>
@@ -198,7 +199,7 @@
       <tr><td>E</td><td>Open the workshop (crafting)</td></tr>
       <tr><td>1–9 / wheel</td><td>Choose hotbar slot</td></tr>
       <tr><td>F</td><td>Toggle flying (Space up, C down)</td></tr>
-      <tr><td>T / Enter</td><td>Chat with other players</td></tr>
+      <tr><td>T / Enter</td><td>Chat · type <b>/help</b> for commands</td></tr>
       <tr><td>Esc</td><td>Pause</td></tr>
     </table>
     <button id="newWorld">Generate a new world</button>
@@ -208,7 +209,7 @@
   <div class="panel" id="panel">
     <div class="ph"><b>Workshop</b><span>Press E or click outside to close</span></div>
     <div class="cols">
-      <div><h3>Your bag</h3><div id="bag"></div><p class="tip">Click an item to put it in your selected hotbar slot.</p></div>
+      <div><h3 id="bagTitle">Your bag</h3><div id="bag"></div><p class="tip">Click an item to put it in your selected hotbar slot.</p></div>
       <div><h3>Recipes</h3><div id="recipes"></div></div>
     </div>
   </div>
@@ -586,6 +587,9 @@ const toastOnce = (k, msg, s = 3) => { const n = performance.now(); if (!lastToa
 
 // ================= Inventory =================
 let inv = {}, hot = Array(9).fill(0), sel = 0;
+// Creative mode: every block and item, nothing runs out, no damage. The survival bag is kept aside meanwhile.
+const creative = { on: false, saved: null, hot: null };
+const realBag = () => creative.on && creative.saved ? creative.saved : { inv, hot };
 const held = () => hot[sel];
 const has = (id, n) => (inv[id] || 0) >= n;
 function give(id, n) {
@@ -594,6 +598,7 @@ function give(id, n) {
   refreshBar(); dirty = true;
 }
 function take(id, n) {
+  if (creative.on) return;   // nothing runs out in creative
   inv[id] -= n;
   if (inv[id] <= 0) { delete inv[id]; const i = hot.indexOf(id); if (i >= 0) hot[i] = 0; }
   refreshBar(); dirty = true;
@@ -604,7 +609,7 @@ function refreshBar() {
   [...bar.children].forEach((d, i) => {
     const id = hot[i];
     d.className = 'slot' + (i === sel ? ' on' : '');
-    d.innerHTML = `<span>${i + 1}</span>` + (id ? `<img src="${icons[id]}" alt=""><b>${inv[id] > 1 ? inv[id] : ''}</b>` : '');
+    d.innerHTML = `<span>${i + 1}</span>` + (id ? `<img src="${icons[id]}" alt=""><b>${creative.on ? '' : inv[id] > 1 ? inv[id] : ''}</b>` : '');
   });
   const h = held();
   $('held').src = h ? icons[h] : FIST;
@@ -628,9 +633,10 @@ let uiOpen = false;
 function renderCraft() {
   const ids = Object.keys(inv).map(Number).sort((a, b) => a - b);
   $('bag').innerHTML = ids.length ? '' : '<div class="empty">Nothing yet. Try punching a tree!</div>';
+  $('bagTitle').textContent = creative.on ? 'Creative — everything, forever' : 'Your bag';
   ids.forEach(id => {
     const d = document.createElement('div'); d.className = 'it'; d.title = nameOf(id);
-    d.innerHTML = `<img src="${icons[id]}" alt=""><b>${inv[id]}</b>`;
+    d.innerHTML = `<img src="${icons[id]}" alt=""><b>${creative.on ? '' : inv[id]}</b>`;
     d.onclick = e => { e.stopPropagation(); const j = hot.indexOf(id); if (j >= 0) hot[j] = 0; hot[sel] = id; refreshBar(); toast(`${nameOf(id)} → slot ${sel + 1}`); };
     $('bag').appendChild(d);
   });
@@ -669,12 +675,13 @@ const acct = { sb: null, user: null, name: '', mode: 'none', lastSaved: '', savi
 const BAG_KEY = SAVE_KEY + '-bag';
 function save() {
   // a logged-in character's bag lives in their account, not in this browser
-  if (acct.mode !== 'user') { try { localStorage.setItem(BAG_KEY, JSON.stringify({ inv, hot, hp: P.hp })); } catch (e) {} }
+  const bag = realBag();
+  if (acct.mode !== 'user') { try { localStorage.setItem(BAG_KEY, JSON.stringify({ inv: bag.inv, hot: bag.hot, hp: P.hp })); } catch (e) {} }
   if (online.shared) return;   // the shared world lives online
   try {
     let s = '';
     for (let i = 0; i < world.length; i += 8192) s += String.fromCharCode.apply(null, world.subarray(i, i + 8192));
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ seed, data: btoa(s), inv, hot, hp: P.hp, clock }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ seed, data: btoa(s), inv: bag.inv, hot: bag.hot, hp: P.hp, clock }));
   } catch (e) {}
 }
 function load() {
@@ -721,6 +728,7 @@ function collideBox(px, py, pz, hw, h) {
 }
 function refreshHP() { $('hp').innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < P.hp ? '' : 'off'}"></i>`).join(''); }
 function hurtPlayer(n, from) {
+  if (creative.on) return;
   P.hp = Math.max(0, P.hp - n); regenT = 0; refreshHP(); dirty = true;
   $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 180);
   if (from) { const dx = P.p.x - from.x, dz = P.p.z - from.z, d = Math.hypot(dx, dz) || 1; P.kb.set(dx / d * 7, 0, dz / d * 7); if (P.ground) P.v.y = 5; }
@@ -966,6 +974,7 @@ function punchPlayer(av) {
 }
 const pickTier = () => ({ 101: 1, 102: 2, 109: 3 })[held()] || 0;
 function mineTime(b) {
+  if (creative.on) return 0.06;
   const B = BLOCKS[b], h = held();
   let mult = 1;
   if (B.pick) mult = [1, 3.2, 5.5, 9][pickTier()];
@@ -976,6 +985,7 @@ function breakBlock(x, y, z) {
   const b = get(x, y, z), B = BLOCKS[b];
   editBlock(x, y, z, 0);
   burst(x + .5, y + .5, z + .5, B.pc, 10);
+  if (creative.on) return;
   if (B.pick && pickTier() < B.pick) { toastOnce('pick' + B.pick, `${B.n} crumbled — you need ${B.pick > 1 ? 'a stone pickaxe or better' : 'a pickaxe'} to collect it.`); return; }
   if (B.drop) { give(B.drop, 1); toast(`💎 +1 ${nameOf(B.drop)}!`); return; }
   if (b === 6) { if (Math.random() < .5) give(6, 1); if (Math.random() < .2) give(100, 1); return; }
@@ -1134,7 +1144,7 @@ addEventListener('wheel', e => { if (playing && !uiOpen) select(sel + (e.deltaY 
 addEventListener('keydown', e => {
   if (e.target === chatIn || chatOpen()) return;
   if (e.target && e.target.tagName === 'INPUT') return;   // typing in the login form
-  if ((e.code === 'KeyT' || e.code === 'Enter') && playing && !uiOpen && online.room) { e.preventDefault(); openChat(); return; }
+  if ((e.code === 'KeyT' || e.code === 'Enter' || e.code === 'Slash') && playing && !uiOpen) { e.preventDefault(); openChat(); if (e.code === 'Slash') chatIn.value = '/'; return; }
   if (e.code === 'KeyE' && playing) { e.preventDefault(); uiOpen ? closeCraft() : openCraft(); return; }
   if (uiOpen) { if (e.code === 'Escape') closeCraft(); return; }
   keys[e.code] = true;
@@ -1173,13 +1183,12 @@ holdBtn('bDown', () => { keys.KeyC = true; }, () => { keys.KeyC = false; });
 holdBtn('bFly', () => { if (!playing) return; P.fly = !P.fly; P.v.y = 0; toast(P.fly ? 'Flying on — ⤒ up, ⤓ down' : 'Flying off'); });
 holdBtn('bCraft', () => { if (playing) uiOpen ? closeCraft() : openCraft(); });
 holdBtn('bPause', () => { if (playing) pause(); });
-holdBtn('bChat', () => { if (playing && !uiOpen && online.room) openChat(); });
+holdBtn('bChat', () => { if (playing && !uiOpen) openChat(); });
 setInterval(() => {
   // keep mining while ⛏ is held, moving on to the next block you look at
   if (mineHeld && playing && !uiOpen && !lmb) { const t = target(); if (t && t.block && !online.readOnly) lmb = true; }
   document.body.classList.toggle('flying', P.fly);
   $('bFly').classList.toggle('on', P.fly);
-  $('bChat').style.display = online.room ? 'flex' : 'none';
 }, 120);
 
 // joystick
@@ -1316,7 +1325,7 @@ function frame(now) {
   frames++; fpsT += dt;
   if (fpsT > 0.5) { fps = Math.round(frames / fpsT); frames = 0; fpsT = 0; }
   const hour = Math.floor(((clock / DAY + 0.25) % 1) * 24);
-  hud.innerHTML = `${fps} fps · ${night ? '☾' : '☀'} ${String(hour).padStart(2, '0')}:00<br>x ${P.p.x.toFixed(1)}  y ${P.p.y.toFixed(1)}  z ${P.p.z.toFixed(1)}${P.fly ? '<br>✈ flying' : ''}`;
+  hud.innerHTML = `${fps} fps · ${night ? '☾' : '☀'} ${String(hour).padStart(2, '0')}:00<br>x ${P.p.x.toFixed(1)}  y ${P.p.y.toFixed(1)}  z ${P.p.z.toFixed(1)}${P.fly ? '<br>✈ flying' : ''}${acct.isAdmin ? '<br>👑 admin' : ''}${creative.on ? ' · ✨ creative' : ''}`;
   renderer.render(scene, camera);
 }
 const hud = $('hud');
@@ -1412,6 +1421,7 @@ function onWorld(snap) {
     $('newWorld').style.display = online.canAdmin ? '' : 'none';
     return;
   }
+  if (Number.isFinite(meta.t0) && meta.t0 !== online.t0) online.t0 = meta.t0;   // an admin changed the time of day
   for (const ch of snap.docChanges()) {
     const m = /^c(\d+)$/.exec(ch.doc.id);
     if (!m || ch.type === 'removed' || +m[1] >= NC * NC) continue;
@@ -1564,8 +1574,10 @@ chatIn.addEventListener('keydown', e => {
   if (e.code === 'Enter') {
     e.preventDefault();
     const t = chatIn.value.trim().slice(0, 200);
-    if (t && online.room) { sayN = Date.now(); online.room.presence({ say: { t, n: sayN } }).catch(() => toast('Message not sent.')); addChat(null, true, t); }
     closeChat();
+    if (t.startsWith('/')) runCommand(t);
+    else if (t && online.room) { sayN = Date.now(); online.room.presence({ say: { t, n: sayN } }).catch(() => toast('Message not sent.')); addChat(null, true, t); }
+    else if (t) sysChat('Nobody else is here. Type /help to see commands.');
   }
 });
 async function addChat(by, me, t) {
@@ -1594,6 +1606,12 @@ function setupRoom(room) {
       if (d.b === 0) burst(d.x + .5, d.y + .5, d.z + .5, BLOCKS[get(d.x, d.y, d.z)].pc, 8);
       set(d.x, d.y, d.z, d.b); rebuildAt(d.x, d.z);
     }
+  }, () => {});
+  room.on('fill', msg => {
+    if (msg.sameTab || !online.shared) return;
+    const d = msg.data || {};
+    if (d.e !== online.epoch || !Array.isArray(d.a) || d.a.length !== 6 || !d.a.every(Number.isInteger) || !Number.isInteger(d.b) || d.b < 0 || d.b >= BLOCKS.length) return;
+    fillBox(...d.a, d.b, false);
   }, () => {});
   room.on('lit', msg => {
     if (msg.sameTab || !online.shared) return;
@@ -1686,6 +1704,7 @@ function sbRoom(sb, me) {
     })
     .on('broadcast', { event: 'edit' }, ({ payload }) => { (handlers.edit || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
     .on('broadcast', { event: 'lit' }, ({ payload }) => { (handlers.lit || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
+    .on('broadcast', { event: 'fill' }, ({ payload }) => { (handlers.fill || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
     .subscribe(async status => {
       if (status === 'SUBSCRIBED') { live = true; await ch.track({ uid: me.id, name: me.name }); sendState(); }
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') live = false;
@@ -1741,6 +1760,199 @@ async function goOnline() {
   }
 }
 
+// ================= Creative mode, admin & chat commands =================
+// Creative: guests (playing alone) and admins. Admins (the world_admins table) also get the world-editing commands.
+const canCreative = () => acct.mode === 'guest' || !!acct.isAdmin;
+const isAdmin = () => !!acct.isAdmin;
+function refreshModeBtn() {
+  const b = $('btnCreative'); if (!b) return;
+  b.classList.toggle('hidden', !canCreative() || acct.mode === 'none');
+  b.textContent = `Creative mode: ${creative.on ? 'on ✨' : 'off'}`;
+}
+function setCreative(on) {
+  if (on === creative.on) return;
+  if (on && !canCreative()) { sysChat('Creative mode is for admins on the shared island.'); return; }
+  if (on) {
+    creative.saved = { inv: { ...inv }, hot: hot.slice() };
+    inv = {}; for (let id = 1; id < BLOCKS.length; id++) inv[id] = 1; for (const id in ITEMS) inv[id] = 1;
+    hot = creative.hot || [1, 3, 5, 7, 8, 9, 10, 13, 14];
+    P.hp = 10; refreshHP();
+  } else {
+    creative.hot = hot.slice();
+    inv = creative.saved.inv; hot = creative.saved.hot; creative.saved = null; P.fly = false;
+  }
+  creative.on = on; dirty = true;
+  refreshBar(); refreshModeBtn(); if (uiOpen) renderCraft();
+  toast(on ? '✨ Creative mode — press E for every block · F to fly' : 'Back to survival — your own bag is back');
+}
+function giveReal(id, n) { if (creative.on && creative.saved) { const b = creative.saved; b.inv[id] = (b.inv[id] || 0) + n; if (!b.hot.includes(id)) { const e = b.hot.indexOf(0); if (e >= 0) b.hot[e] = id; } dirty = true; } else give(id, n); }
+$('btnCreative').addEventListener('click', e => { e.stopPropagation(); setCreative(!creative.on); });
+$('btnCreative').addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); setCreative(!creative.on); }, { passive: false });
+
+function sysChat(t) {
+  const line = document.createElement('div'), b = document.createElement('b');
+  b.textContent = '» '; b.style.color = '#8fd3ff';
+  line.append(b, document.createTextNode(t)); line.style.color = '#cfeaff';
+  chatLog.appendChild(line);
+  while (chatLog.children.length > 10) chatLog.firstChild.remove();
+  chatLog.classList.add('open'); clearTimeout(sysChat.t); sysChat.t = setTimeout(() => { if (!chatOpen()) chatLog.classList.remove('open'); }, 9000);
+  setTimeout(() => line.classList.add('old'), 15000);
+}
+const norm = t => String(t).toLowerCase().replace(/[\s_\-]/g, '');
+function itemId(word) {
+  if (/^\d+$/.test(word)) { const n = +word; return (n === 0 || isBlock(n) || ITEMS[n]) ? n : -1; }
+  const w = norm(word);
+  if (w === 'air' || w === 'empty') return 0;
+  for (let id = 1; id < BLOCKS.length; id++) if (norm(BLOCKS[id].n) === w) return id;
+  for (const id in ITEMS) if (norm(ITEMS[id].n) === w) return +id;
+  for (let id = 1; id < BLOCKS.length; id++) if (norm(BLOCKS[id].n).startsWith(w)) return id;
+  for (const id in ITEMS) if (norm(ITEMS[id].n).startsWith(w)) return +id;
+  return -1;
+}
+function coord(v, base) {   // "12", "~", "~3", "~-2"
+  if (v === undefined) return NaN;
+  if (v[0] === '~') return Math.floor(base) + (v.length > 1 ? parseInt(v.slice(1), 10) : 0);
+  return parseInt(v, 10);
+}
+function fillBox(x1, y1, z1, x2, y2, z2, b, mine) {
+  const [ax, bx] = [Math.max(0, Math.min(x1, x2)), Math.min(W - 1, Math.max(x1, x2))];
+  const [ay, by] = [Math.max(0, Math.min(y1, y2)), Math.min(H - 1, Math.max(y1, y2))];
+  const [az, bz] = [Math.max(0, Math.min(z1, z2)), Math.min(W - 1, Math.max(z1, z2))];
+  const chunks = new Set(); let n = 0;
+  for (let y = ay; y <= by; y++) for (let z = az; z <= bz; z++) for (let x = ax; x <= bx; x++) {
+    if (get(x, y, z) === b) continue;
+    set(x, y, z, b); noteBlock(x, y, z, b, mine); n++;
+    for (const [cx, cz] of [[x, z], [x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1]])
+      if (cx >= 0 && cx < W && cz >= 0 && cz < W) chunks.add(Math.floor(cx / CS) + ',' + Math.floor(cz / CS));
+  }
+  chunks.forEach(k => { const [a, c] = k.split(',').map(Number); buildChunk(a, c); });
+  return n;
+}
+function setTimeOfDay(hour) {
+  const target = ((((hour + 0.05) / 24 - 0.25) % 1) + 1) % 1 * DAY;   // +0.05 h so the clock reads the asked hour
+  if (online.shared) {
+    if (!online.db) return false;
+    online.db.doc('world/meta').set({ seed, epoch: online.epoch, t0: Date.now() / 1000 + DAY * 0.08 - target })
+      .catch(() => sysChat('Couldn’t change the time (admins only).'));
+  } else clock = target;
+  return true;
+}
+const findPlayer = name => { const w = norm(name); for (const o of others.values()) if (norm(o.name || '') === w) return o; for (const o of others.values()) if (norm(o.name || '').startsWith(w)) return o; return null; };
+const HELP = [
+  ['/gamemode creative|survival', 'switch mode (also /c and /s)', 'creative'],
+  ['/give ITEM [COUNT] [PLAYER]', 'e.g. /give tnt 10 — names: tnt, stone, diamond_pickaxe…', 'admin'],
+  ['/fill X1 Y1 Z1 X2 Y2 Z2 BLOCK', 'fill a box (~ = where you stand, ~3 = 3 from you, air = clear)', 'admin'],
+  ['/setblock X Y Z BLOCK', 'change one block', 'admin'],
+  ['/tp PLAYER  or  /tp X Y Z', 'teleport', 'admin'],
+  ['/time day|noon|sunset|night|midnight|HOUR', 'change the time for everyone', 'admin'],
+  ['/heal', 'full health', 'admin'],
+  ['/clear', 'empty your bag', 'admin'],
+  ['/spawn hopkin|gloomling [N]', 'make creatures near you', 'admin'],
+  ['/killmobs', 'remove all creatures', 'admin'],
+  ['/newworld', 'start a brand-new shared island (careful!)', 'admin'],
+  ['/pos', 'show where you are', 'all'],
+  ['/fly', 'flying on/off', 'all'],
+];
+async function runCommand(text) {
+  const [raw, ...a] = text.slice(1).trim().split(/\s+/);
+  const c = (raw || '').toLowerCase();
+  const adminOk = isAdmin() || acct.mode === 'guest';   // alone as a guest you are the admin of your own island
+  const need = () => { if (adminOk) return true; sysChat(`/${c} is for admins.`); return false; };
+  const px = P.p.x, py = P.p.y, pz = P.p.z;
+  switch (c) {
+    case 'help': case '?':
+      sysChat(adminOk ? 'Commands:' : 'Commands (admins have more):');
+      HELP.filter(h => h[2] === 'all' || (h[2] === 'creative' ? canCreative() : adminOk)).forEach(h => sysChat(`${h[0]} — ${h[1]}`));
+      return;
+    case 'pos': sysChat(`You are at x ${Math.floor(px)}  y ${Math.floor(py)}  z ${Math.floor(pz)}`); return;
+    case 'fly': P.fly = !P.fly; P.v.y = 0; sysChat(P.fly ? 'Flying on' : 'Flying off'); return;
+    case 'c': setCreative(true); return;
+    case 's': setCreative(false); return;
+    case 'gamemode': case 'gm': {
+      const m = (a[0] || '').toLowerCase();
+      if (m.startsWith('c') || m === '1') setCreative(true);
+      else if (m.startsWith('s') || m === '0') setCreative(false);
+      else sysChat('Use /gamemode creative or /gamemode survival');
+      return;
+    }
+    case 'give': {
+      if (!need()) return;
+      const id = itemId(a[0] || '');
+      if (id <= 0) { sysChat(`Unknown item "${a[0] || ''}". Try: tnt, stone, log, diamond, diamond_pickaxe`); return; }
+      const n = Math.max(1, Math.min(999, parseInt(a[1] || '1', 10) || 1));
+      const who = a[2];
+      if (!who || norm(who) === norm(acct.name || '') || norm(who) === 'me') { giveReal(id, n); sysChat(`Gave you ${n} ${nameOf(id)}`); return; }
+      if (!acct.sb || acct.mode !== 'user') { sysChat('Log in to give items to other players.'); return; }
+      const { data, error } = await acct.sb.rpc('admin_give', { target: who.toLowerCase(), item: id, n });
+      if (error) sysChat('Couldn’t give: ' + error.message);
+      else sysChat(data ? `🎁 Sent ${n} ${nameOf(id)} to ${who} (arrives within 15 s)` : `No player called "${who}"`);
+      return;
+    }
+    case 'fill': case 'setblock': {
+      if (!need()) return;
+      const one = c === 'setblock';
+      const nums = one ? a.slice(0, 3) : a.slice(0, 6), word = one ? a[3] : a[6];
+      const bases = [px, py, pz, px, py, pz];
+      const v = nums.map((t, i) => coord(t, bases[i]));
+      const id = itemId(word || '');
+      if (v.length !== nums.length || v.some(n => !Number.isFinite(n)) || nums.length !== (one ? 3 : 6)) { sysChat(one ? 'Use /setblock X Y Z BLOCK' : 'Use /fill X1 Y1 Z1 X2 Y2 Z2 BLOCK (try ~ for where you stand)'); return; }
+      if (id < 0 || (id > 0 && !isBlock(id))) { sysChat(`"${word || ''}" isn’t a block. Try: stone, planks, glass, air`); return; }
+      const box = one ? [v[0], v[1], v[2], v[0], v[1], v[2]] : v;
+      const vol = (Math.abs(box[3] - box[0]) + 1) * (Math.abs(box[4] - box[1]) + 1) * (Math.abs(box[5] - box[2]) + 1);
+      if (vol > 40000) { sysChat(`That’s ${vol} blocks — the limit is 40000 at once.`); return; }
+      if (online.shared && online.readOnly) { sysChat('You can’t build on this island.'); return; }
+      const n = fillBox(...box, id, true);
+      if (online.room && online.shared) online.room.emit('fill', { a: box, b: id, e: online.epoch }).catch(() => {});
+      sysChat(`Changed ${n} block${n === 1 ? '' : 's'} to ${id ? nameOf(id) : 'air'}`);
+      return;
+    }
+    case 'tp': {
+      if (!need()) return;
+      if (a.length >= 3) {
+        const x = coord(a[0], px), y = coord(a[1], py), z = coord(a[2], pz);
+        if (![x, y, z].every(Number.isFinite)) { sysChat('Use /tp X Y Z'); return; }
+        P.p.set(Math.max(.5, Math.min(W - .5, x + .5)), Math.max(1, Math.min(H + 10, y)), Math.max(.5, Math.min(W - .5, z + .5))); P.v.set(0, 0, 0);
+        sysChat(`Teleported to ${x} ${y} ${z}`); return;
+      }
+      if (!a[0]) { sysChat('Use /tp PLAYER or /tp X Y Z'); return; }
+      const o = findPlayer(a[0]);
+      if (!o) { sysChat(`Can’t see a player called "${a[0]}" on this island.`); return; }
+      P.p.set(o.g.position.x + 1, o.g.position.y + .2, o.g.position.z); P.v.set(0, 0, 0);
+      sysChat(`Teleported to ${o.name}`); return;
+    }
+    case 'time': {
+      if (!need()) return;
+      const w = (a[0] || '').toLowerCase();
+      const hour = { day: 8, morning: 7, noon: 12, sunset: 18, evening: 19, night: 22, midnight: 0 }[w] ?? (/^\d+$/.test(w) ? +w % 24 : NaN);
+      if (!Number.isFinite(hour)) { sysChat('Use /time day, noon, sunset, night, midnight or an hour 0–23'); return; }
+      if (setTimeOfDay(hour)) sysChat(`Time set to ${String(hour).padStart(2, '0')}:00${online.shared ? ' for everyone' : ''}`);
+      return;
+    }
+    case 'heal': if (!need()) return; P.hp = 10; refreshHP(); sysChat('Healed'); return;
+    case 'clear': if (!need()) return; if (creative.on) { sysChat('Switch to survival first (/s) to clear your bag.'); return; } inv = {}; hot = Array(9).fill(0); refreshBar(); dirty = true; sysChat('Bag emptied'); return;
+    case 'killmobs': { if (!need()) return; const n = mobs.length; while (mobs.length) removeMob(mobs[0]); sysChat(`Removed ${n} creature${n === 1 ? '' : 's'}`); return; }
+    case 'spawn': {
+      if (!need()) return;
+      const t = (a[0] || '').toLowerCase().startsWith('g') ? 'gloomling' : (a[0] || '').toLowerCase().startsWith('h') ? 'hopkin' : null;
+      if (!t) { sysChat('Use /spawn hopkin or /spawn gloomling [how many]'); return; }
+      const n = Math.max(1, Math.min(10, parseInt(a[1] || '1', 10) || 1));
+      for (let i = 0; i < n; i++) {
+        const ang = Math.random() * Math.PI * 2, x = Math.max(1, Math.min(W - 2, Math.floor(px + Math.cos(ang) * 4))), z = Math.max(1, Math.min(W - 2, Math.floor(pz + Math.sin(ang) * 4)));
+        addMob(t, x + .5, Math.max(surfaceY(x, z) + 1.2, py), z + .5);
+      }
+      sysChat(`Spawned ${n} ${t}${n > 1 ? 's' : ''}`); return;
+    }
+    case 'newworld': {
+      if (!need()) return;
+      if (a[0] !== 'confirm') { sysChat('This wipes the island for everyone. Type /newworld confirm to do it.'); return; }
+      if (online.shared) { if (!online.canAdmin) { sysChat('Only admins can reset the shared island.'); return; } resetShared(); sysChat('Starting a new island…'); }
+      else $('newWorld').click();
+      return;
+    }
+    default: sysChat(`Unknown command /${c}. Type /help`);
+  }
+}
+
 // ================= Accounts (Supabase) =================
 // Username + password log-in. Each character's bag, hotbar, health and position are
 // stored in the `players` table (see supabase/setup.sql). The publishable key is safe
@@ -1757,7 +1969,8 @@ function setMode(mode) {
   $('authUser').classList.toggle('hidden', mode !== 'user');
   $('playLabel').classList.toggle('hidden', mode === 'none');
   overlay.style.cursor = mode === 'none' ? 'default' : 'pointer';
-  if (mode === 'user') $('authName').textContent = acct.name;
+  if (mode === 'user') $('authName').textContent = acct.name + (acct.isAdmin ? ' 👑' : '');
+  refreshModeBtn();
 }
 async function signIn(signup) {
   if (!acct.sb) return authMsg('Can’t reach the account server. You can still play as a guest.', true);
@@ -1802,7 +2015,9 @@ async function enterAccount(user) {
   } else {                                  // brand-new character
     inv = {}; hot = Array(9).fill(0); P.hp = 10; spawn();
   }
+  try { const { data: ad } = await acct.sb.from('world_admins').select('user_id').eq('user_id', user.id).maybeSingle(); acct.isAdmin = !!ad; } catch (e) { acct.isAdmin = false; }
   refreshBar(); refreshHP(); authMsg(''); setMode('user');
+  if (acct.isAdmin) setTimeout(() => toast('👑 Admin — press T (or 💬) and type /help'), 1500);
   await claimGift();
   await cloudSave(true);
   toast(`Welcome, ${acct.name}!`);
@@ -1811,11 +2026,12 @@ async function enterAccount(user) {
 async function cloudSave(force) {
   if (acct.mode !== 'user' || !acct.user || acct.saving) return;
   const pos = [+P.p.x.toFixed(2), +P.p.y.toFixed(2), +P.p.z.toFixed(2)];
-  const snap = JSON.stringify([inv, hot, P.hp, pos]);
+  const bag = realBag();
+  const snap = JSON.stringify([bag.inv, bag.hot, P.hp, pos]);
   if (!force && snap === acct.lastSaved) return;
   acct.saving = true;
   try {
-    const { error } = await acct.sb.from('players').upsert({ user_id: acct.user.id, username: acct.name, inv, hot, hp: P.hp, pos, updated_at: new Date().toISOString() });
+    const { error } = await acct.sb.from('players').upsert({ user_id: acct.user.id, username: acct.name, inv: bag.inv, hot: bag.hot, hp: P.hp, pos, updated_at: new Date().toISOString() });
     if (error) toastOnce('cloud', 'Couldn’t save your character online: ' + error.message, 30); else acct.lastSaved = snap;
   } catch (e) { toastOnce('cloud', 'Couldn’t save your character online.', 30); }
   acct.saving = false;
@@ -1835,7 +2051,7 @@ async function claimGift() {
       // clear it only if it is still the same gift, so two open tabs can't both collect it
       const { data: took, error } = await acct.sb.from('players').update({ gift: {} }).eq('user_id', acct.user.id).eq('gift', JSON.stringify(g)).select('user_id');
       if (!error && took && took.length && items.length) {
-        items.forEach(([id, n]) => give(id, n));
+        items.forEach(([id, n]) => giveReal(id, n));
         toast('🎁 Gift received: ' + items.map(([id, n]) => `${n} ${nameOf(id)}`).join(', '));
         await cloudSave(true);
       }
