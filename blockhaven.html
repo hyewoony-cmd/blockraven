@@ -337,6 +337,15 @@ paint(14, (x, y, r) => {                                   // diamond block
   if (lx + ly > 10) return vary([110, 214, 228], r, 10);
   return vary([160, 236, 246], r, 12);
 });
+const TNT_TXT = ['.###.#...#.###..', '..#..##..#..#...', '..#..#.#.#..#...', '..#..#..##..#...', '..#..#...#..#...'];
+paint(15, (x, y, r) => {                                   // TNT
+  if (y >= 4 && y <= 10) {
+    if (y >= 5 && y <= 9 && TNT_TXT[y - 5][15 - x] === '#') return [40, 36, 34];   // side faces show textures mirrored
+    return vary([236, 230, 220], r, 10);
+  }
+  const s = x % 4 === 3 ? -40 : 0;
+  return vary([200 + s, 46 + s / 2, 38 + s / 2], r, 18);
+});
 
 // ================= Blocks & items =================
 // hard = seconds to mine by hand; pick = needs a pickaxe to drop
@@ -354,6 +363,7 @@ const BLOCKS = [null,
   { n: 'Fluff Block', t: [12, 12, 12],  hard: 0.5, pc: 0xf3ead6 },
   { n: 'Diamond Ore', t: [13, 13, 13],  hard: 7,   pc: 0x9fe9f2, pick: 2, drop: 108 },
   { n: 'Diamond Block', t: [14, 14, 14], hard: 6,  pc: 0xb8f4fa, pick: 2 },
+  { n: 'TNT',         t: [15, 15, 15],  hard: 0.3, pc: 0xd8342c, d: 'Hit it to light the fuse — then run!' },
 ];
 const isBlock = id => id > 0 && id < BLOCKS.length;
 const ITEMS = {
@@ -378,6 +388,7 @@ const RECIPES = [
   { out: 109, n: 1, in: [[108, 3], [100, 2]] },
   { out: 110, n: 1, in: [[108, 2], [100, 1]] },
   { out: 13,  n: 1, in: [[108, 4]] },
+  { out: 14,  n: 1, in: [[106, 3], [108, 1]] },
 ];
 
 // ---- icons ----
@@ -627,7 +638,7 @@ function renderCraft() {
   RECIPES.forEach(r => {
     const can = r.in.every(([id, n]) => has(id, n));
     const row = document.createElement('div'); row.className = 'rec' + (can ? '' : ' no');
-    const desc = ITEMS[r.out] && ITEMS[r.out].d ? `<br><small>${ITEMS[r.out].d}</small>` : '';
+    const info = ITEMS[r.out] || BLOCKS[r.out], desc = info && info.d ? `<br><small>${info.d}</small>` : '';
     row.innerHTML = `<img src="${icons[r.out]}" alt=""><div class="nm">${nameOf(r.out)}${r.n > 1 ? ' ×' + r.n : ''}${desc}</div>
       <div class="ing">${r.in.map(([id, n]) => `<span class="chip${has(id, n) ? '' : ' miss'}"><img src="${icons[id]}" alt="">${n} ${nameOf(id)}</span>`).join('')}</div>`;
     const b = document.createElement('button'); b.textContent = 'Craft'; b.disabled = !can;
@@ -941,7 +952,8 @@ function primaryDown() {
     if (attackCd > 0) return;
     attackCd = .4; swing();
     if (t.mob) hitMob(t.mob, dir); else punchPlayer(t.player);
-  } else if (t && canBuildNow()) lmb = true;
+  } else if (t && t.block && get(t.block.x, t.block.y, t.block.z) === TNT) { swing(); igniteTNT(t.block.x, t.block.y, t.block.z); }
+  else if (t && canBuildNow()) lmb = true;
   else swing();   // a punch at thin air
 }
 function punchPlayer(av) {
@@ -991,6 +1003,79 @@ function canBuildNow() {
 function editBlock(x, y, z, b) {
   set(x, y, z, b); rebuildAt(x, z); dirty = true;
   online.local(x, y, z, b);
+}
+
+// ================= TNT =================
+// Hitting a placed TNT block lights a 3-second fuse; the blast clears a rough sphere, hurts whoever
+// is close and sets off nearby TNT. Online, the player who lit it saves the result; everyone else
+// gets a single 'lit' message and plays the same fuse and blast on their own screen.
+const TNT = 14, TNT_FUSE = 3, TNT_R = 3.2;
+const fuses = [];
+const fuseGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+let shake = 0;
+function noteBlock(x, y, z, b, mine) {
+  dirty = true;
+  if (mine) online.local(x, y, z, b, true);   // saved by whoever lit it, without a message per block
+  else if (online.shared) { const k = ck(x, z); (online.diffs[k] = online.diffs[k] || {})[x + ',' + y + ',' + z] = b; }
+}
+function lightFuse(x, y, z, mine, t) {
+  if (fuses.some(f => f.x === x && f.y === y && f.z === z)) return;
+  if (get(x, y, z) === TNT) { set(x, y, z, 0); noteBlock(x, y, z, 0, mine); rebuildAt(x, z); }
+  const mesh = new THREE.Mesh(fuseGeo, new THREE.MeshBasicMaterial({ color: 0xd8342c }));
+  mesh.position.set(x + .5, y + .5, z + .5); scene.add(mesh);
+  fuses.push({ x, y, z, t, t0: t, mine, mesh });
+}
+function igniteTNT(x, y, z) {
+  if (!canBuildNow()) return;
+  lightFuse(x, y, z, true, TNT_FUSE);
+  toastOnce('tnt', '💥 TNT lit — run!', 2);
+  if (online.room && online.shared) online.room.emit('lit', { x, y, z, e: online.epoch }).catch(() => {});
+}
+function explode(f) {
+  const { x, y, z, mine } = f, cx = x + .5, cy = y + .5, cz = z + .5;
+  const chunks = new Set();
+  const addChunk = (X, Z) => {
+    const a = Math.floor(X / CS), b = Math.floor(Z / CS), lx = X % CS, lz = Z % CS;
+    chunks.add(a + ',' + b);
+    if (lx === 0 && a > 0) chunks.add((a - 1) + ',' + b); if (lx === CS - 1 && a < NC - 1) chunks.add((a + 1) + ',' + b);
+    if (lz === 0 && b > 0) chunks.add(a + ',' + (b - 1)); if (lz === CS - 1 && b < NC - 1) chunks.add(a + ',' + (b + 1));
+  };
+  let shown = 0;
+  for (let dx = -4; dx <= 4; dx++) for (let dy = -4; dy <= 4; dy++) for (let dz = -4; dz <= 4; dz++) {
+    const X = x + dx, Y = y + dy, Z = z + dz;
+    if (X < 0 || X >= W || Z < 0 || Z >= W || Y < 1 || Y >= H) continue;   // the bottom layer stays
+    if (Math.hypot(dx, dy, dz) > TNT_R - th(X * 7 + Y, Z, 91) * 0.9) continue;   // same ragged edge on every screen
+    const b = get(X, Y, Z); if (!b) continue;
+    if (b === TNT) { lightFuse(X, Y, Z, mine, 0.4 + th(X, Y + Z, 92) * 0.5); continue; }   // chain reaction
+    if (shown++ < 14) burst(X + .5, Y + .5, Z + .5, BLOCKS[b].pc, 2);
+    set(X, Y, Z, 0); noteBlock(X, Y, Z, 0, mine); addChunk(X, Z);
+  }
+  chunks.forEach(s => { const [a, b] = s.split(',').map(Number); buildChunk(a, b); });
+  burst(cx, cy, cz, 0xffd27a, 18); burst(cx, cy, cz, 0xff6a2a, 18); burst(cx, cy + .5, cz, 0x5a5a5a, 14); burst(cx, cy, cz, 0xffffff, 8);
+  // you (each player works out their own damage)
+  const pd = Math.hypot(P.p.x - cx, P.p.y + .9 - cy, P.p.z - cz);
+  shake = Math.max(shake, Math.max(0, .7 - pd * .04));
+  if (pd < 6) { hurtPlayer(Math.max(1, Math.round((1 - pd / 6) * 9)), { x: cx, z: cz }); P.kb.multiplyScalar(1.5); P.v.y = Math.max(P.v.y, 7 * (1 - pd / 6)); }
+  // creatures near you
+  for (let i = mobs.length - 1; i >= 0; i--) {
+    const m = mobs[i], d = Math.hypot(m.p.x - cx, m.p.y + .5 - cy, m.p.z - cz);
+    if (d > 5) continue;
+    m.hp -= Math.round((1 - d / 5) * 10) + 1; m.flash = .2;
+    const k = 9 / (d || 1); m.kb.set((m.p.x - cx) * k, 0, (m.p.z - cz) * k); m.v.y = 6;
+    if (m.hp <= 0) {
+      burst(m.p.x, m.p.y + .5, m.p.z, m.type === 'hopkin' ? 0xf5e6c8 : 0x6ff7e8, 10);
+      if (mine) give(m.type === 'hopkin' ? 105 : 106, 1);
+      removeMob(m);
+    }
+  }
+}
+function tickFuses(dt) {
+  for (let i = fuses.length - 1; i >= 0; i--) {
+    const f = fuses[i]; f.t -= dt;
+    f.mesh.material.color.setHex(Math.floor(f.t * (f.t < 1 ? 12 : 5)) % 2 ? 0xffffff : 0xd8342c);
+    f.mesh.scale.setScalar(1 + (1 - f.t / f.t0) * .18);
+    if (f.t <= 0) { fuses.splice(i, 1); scene.remove(f.mesh); f.mesh.material.dispose(); explode(f); }
+  }
 }
 
 // ================= Input =================
@@ -1196,9 +1281,11 @@ function frame(now) {
     for (let i = mobs.length - 1; i >= 0; i--) if (mobs[i]) updateMob(mobs[i], dt, light, night);
   }
   updateParticles(dt);
+  tickFuses(dt);
   updateOthers(dt);
   if (active) sendPresence(dt);
   camera.position.set(P.p.x, P.p.y + 1.62, P.p.z);
+  if (shake > 0) { shake = Math.max(0, shake - dt); const s = shake * .35; camera.position.x += (Math.random() - .5) * s; camera.position.y += (Math.random() - .5) * s; camera.position.z += (Math.random() - .5) * s; }
   camera.rotation.set(P.pitch, P.yaw, 0);
   clouds.position.x = (clouds.position.x + dt * 0.8) % 120;
   sunMesh.position.set(camera.position.x + Math.cos(ang) * 200, camera.position.y + Math.sin(ang) * 200, camera.position.z + 40);
@@ -1215,7 +1302,8 @@ function frame(now) {
   const t = active ? target() : null;
   $('cross').className = t && (t.mob || t.player) ? 'mob' : '';
   if (t && t.block) { hl.visible = true; hl.position.set(t.block.x + .5, t.block.y + .5, t.block.z + .5); } else hl.visible = false;
-  if (active && lmb && t && t.block) {
+  if (active && lmb && t && t.block && get(t.block.x, t.block.y, t.block.z) === TNT) { igniteTNT(t.block.x, t.block.y, t.block.z); mine = null; }
+  else if (active && lmb && t && t.block) {
     const b = t.block;
     if (!mine || mine.x !== b.x || mine.y !== b.y || mine.z !== b.z) mine = { x: b.x, y: b.y, z: b.z, p: 0, chip: 0 };
     mine.p += dt / mineTime(get(b.x, b.y, b.z));
@@ -1248,14 +1336,14 @@ function parseDiff(s) {
   }
   return m;
 }
-online.local = (x, y, z, b) => {
+online.local = (x, y, z, b, quiet) => {
   if (online.shared) {
     const k = ck(x, z), key = x + ',' + y + ',' + z;
     (online.diffs[k] = online.diffs[k] || {})[key] = b;
     (online.pend[k] = online.pend[k] || new Set()).add(key);
     clearTimeout(online.timers[k]); online.timers[k] = setTimeout(() => writeChunk(k), 700);
   }
-  if (online.room && online.shared) online.room.emit('edit', { x, y, z, b, e: online.epoch }).catch(() => {});
+  if (online.room && online.shared && !quiet) online.room.emit('edit', { x, y, z, b, e: online.epoch }).catch(() => {});
 };
 async function writeChunk(k) {
   if (online.writing[k]) { online.again[k] = true; return; }
@@ -1507,6 +1595,12 @@ function setupRoom(room) {
       set(d.x, d.y, d.z, d.b); rebuildAt(d.x, d.z);
     }
   }, () => {});
+  room.on('lit', msg => {
+    if (msg.sameTab || !online.shared) return;
+    const d = msg.data || {};
+    if (d.e !== online.epoch || ![d.x, d.y, d.z].every(Number.isInteger) || d.x < 0 || d.x >= W || d.y < 0 || d.y >= H || d.z < 0 || d.z >= W) return;
+    lightFuse(d.x, d.y, d.z, false, TNT_FUSE);
+  }, () => {});
   renderPlayerList();
 }
 // ================= Online: Supabase backend (everywhere outside claude.ai) =================
@@ -1591,6 +1685,7 @@ function sbRoom(sb, me) {
       states.set(payload.k, payload.s); notify();
     })
     .on('broadcast', { event: 'edit' }, ({ payload }) => { (handlers.edit || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
+    .on('broadcast', { event: 'lit' }, ({ payload }) => { (handlers.lit || []).forEach(f => f({ sameTab: false, data: payload || {} })); })
     .subscribe(async status => {
       if (status === 'SUBSCRIBED') { live = true; await ch.track({ uid: me.id, name: me.name }); sendState(); }
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') live = false;
