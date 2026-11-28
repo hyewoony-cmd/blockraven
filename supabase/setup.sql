@@ -28,3 +28,8 @@ create policy "players update own" on public.players
   for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 grant select, insert, update on public.players to authenticated;
+
+-- Gifts: items waiting to be delivered to a player ({ itemId: count }).
+-- The game moves them into the bag and clears this, so an open game can't overwrite them.
+-- Give someone 5 TNT:  update public.players set gift = gift || '{"14": 5}' where username = 'dylanipad';
+alter table public.players add column if not exists gift jsonb not null default '{}'::jsonb;

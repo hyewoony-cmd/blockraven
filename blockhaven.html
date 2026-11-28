@@ -1803,6 +1803,7 @@ async function enterAccount(user) {
     inv = {}; hot = Array(9).fill(0); P.hp = 10; spawn();
   }
   refreshBar(); refreshHP(); authMsg(''); setMode('user');
+  await claimGift();
   await cloudSave(true);
   toast(`Welcome, ${acct.name}!`);
   goOnlineSupabase();   // logged-in players share one island
@@ -1820,6 +1821,29 @@ async function cloudSave(force) {
   acct.saving = false;
 }
 setInterval(() => cloudSave(), 5000);
+// Gifts: items put in the account's `gift` column (e.g. by the owner in Supabase) are moved into the bag.
+// They never sit in `inv` on the server, so an open game saving its own bag can't wipe them out.
+async function claimGift() {
+  if (acct.mode !== 'user' || !acct.user || acct.claiming) return;
+  acct.claiming = true;
+  try {
+    const { data } = await acct.sb.from('players').select('gift').eq('user_id', acct.user.id).maybeSingle();
+    const g = data && data.gift;
+    const items = g && typeof g === 'object' ? Object.entries(g).map(([id, n]) => [Number(id), Math.floor(Number(n))])
+      .filter(([id, n]) => (isBlock(id) || ITEMS[id]) && n > 0 && n <= 999) : [];
+    if (g && Object.keys(g).length) {
+      // clear it only if it is still the same gift, so two open tabs can't both collect it
+      const { data: took, error } = await acct.sb.from('players').update({ gift: {} }).eq('user_id', acct.user.id).eq('gift', JSON.stringify(g)).select('user_id');
+      if (!error && took && took.length && items.length) {
+        items.forEach(([id, n]) => give(id, n));
+        toast('🎁 Gift received: ' + items.map(([id, n]) => `${n} ${nameOf(id)}`).join(', '));
+        await cloudSave(true);
+      }
+    }
+  } catch (e) {}
+  acct.claiming = false;
+}
+setInterval(() => claimGift(), 15000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) cloudSave(); });
 $('authForm').addEventListener('click', e => e.stopPropagation());
 $('btnLogin').addEventListener('click', () => signIn(false));

@@ -44,6 +44,7 @@
 - 첫 화면에서 **아이디 + 비밀번호**로 회원가입/로그인합니다. 로그인하지 않고 "Play as guest"로 혼자 할 수도 있습니다(이 브라우저에만 저장).
 - 로그인한 캐릭터의 **인벤토리, 핫바, 체력, 위치**가 Supabase `players` 테이블에 5초마다(바뀐 경우에만) 저장되고, 다른 컴퓨터에서 로그인해도 그대로 불러옵니다.
 - 캐릭터는 월드와 따로 저장됩니다. "Generate a new world"를 눌러도 로그인한 캐릭터의 가방은 유지됩니다. 월드(블록) 자체는 아직 각 브라우저의 localStorage에 저장됩니다.
+- **아이템 선물하기**: 플레이어 가방(`inv`)을 직접 고치면 열려 있는 게임이 자동 저장하면서 덮어쓸 수 있으니, `gift` 칸에 넣으세요. 게임이 로그인할 때와 15초마다 확인해서 가방에 넣고 비웁니다. 예: Supabase SQL Editor에서 `update public.players set gift = gift || '{"14": 5}' where username = 'dylanipad';` (14 = TNT)
 - 아이디는 Supabase Auth에서 `아이디@players.blockhaven.game` 형태의 숨은 이메일로 쓰입니다. 그래서 이메일로 비밀번호 찾기는 안 됩니다.
 - 코드: `<script>` 맨 아래쪽 **Accounts (Supabase)** 부분(`signIn`, `enterAccount`, `cloudSave`). 접속 정보는 `SUPABASE_URL`, `SUPABASE_KEY`(공개용 publishable key — 브라우저에 넣어도 안전).
 
